@@ -1,8 +1,21 @@
 /* ============================================================
    Plumbing Experts Nairobi — script.js
+   Google Sheets integration via Apps Script Web App
+   ============================================================
+
+   SETUP:
+   1. Deploy Code.gs as a Google Apps Script Web App (see Code.gs).
+   2. Paste your Web App URL below as SHEETS_WEBHOOK_URL.
+   3. That's it — submissions go straight to your Google Sheet.
    ============================================================ */
 
 'use strict';
+
+// ─── CONFIGURATION ────────────────────────────────────────────
+// Paste your deployed Apps Script Web App URL here:
+const SHEETS_WEBHOOK_URL = 'YOUR_APPS_SCRIPT_WEB_APP_URL_HERE';
+// ──────────────────────────────────────────────────────────────
+
 
 // ===== DOM READY =====
 document.addEventListener('DOMContentLoaded', () => {
@@ -25,17 +38,17 @@ function initHeader() {
   };
 
   window.addEventListener('scroll', onScroll, { passive: true });
-  onScroll(); // run once on load
+  onScroll();
 }
 
 
 // ===== MOBILE NAVIGATION =====
 function initMobileNav() {
-  const hamburger    = document.getElementById('hamburger');
-  const mobileNav    = document.getElementById('mobileNav');
-  const mobileClose  = document.getElementById('mobileClose');
+  const hamburger     = document.getElementById('hamburger');
+  const mobileNav     = document.getElementById('mobileNav');
+  const mobileClose   = document.getElementById('mobileClose');
   const mobileOverlay = document.getElementById('mobileOverlay');
-  const mobileLinks  = document.querySelectorAll('.m-link');
+  const mobileLinks   = document.querySelectorAll('.m-link');
 
   if (!hamburger || !mobileNav) return;
 
@@ -56,10 +69,8 @@ function initMobileNav() {
   hamburger.addEventListener('click', open);
   mobileClose?.addEventListener('click', close);
   mobileOverlay?.addEventListener('click', close);
-
   mobileLinks.forEach(link => link.addEventListener('click', close));
 
-  // Close on Escape key
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && mobileNav.classList.contains('open')) close();
   });
@@ -72,22 +83,18 @@ function initSmoothScroll() {
     anchor.addEventListener('click', function (e) {
       const targetId = this.getAttribute('href');
       if (!targetId || targetId === '#') return;
-
       const target = document.querySelector(targetId);
       if (!target) return;
-
       e.preventDefault();
-
       const headerHeight = document.getElementById('header')?.offsetHeight ?? 80;
       const top = target.getBoundingClientRect().top + window.scrollY - headerHeight;
-
       window.scrollTo({ top, behavior: 'smooth' });
     });
   });
 }
 
 
-// ===== CONTACT FORM =====
+// ===== CONTACT FORM — GOOGLE SHEETS INTEGRATION =====
 function initContactForm() {
   const form       = document.getElementById('contactForm');
   const formStatus = document.getElementById('formStatus');
@@ -98,43 +105,99 @@ function initContactForm() {
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
 
+    // Collect values
     const name    = document.getElementById('name')?.value.trim();
     const phone   = document.getElementById('phone')?.value.trim();
-    const message = document.getElementById('message')?.value.trim();
-    const issue   = document.getElementById('issue')?.value;
+    const issue   = document.getElementById('issue')?.value || 'Not specified';
+    const message = document.getElementById('message')?.value.trim() || '—';
 
-    // Validation
-    if (!name) return showStatus('error', 'Please enter your full name.');
+    // ── Client-side validation ──────────────────────────────
+    if (!name)  return showStatus('error', 'Please enter your full name.');
     if (!phone) return showStatus('error', 'Please enter your phone number.');
 
-    const phoneRegex = /^[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{4,10}$/;
-    if (!phoneRegex.test(phone.replace(/\s/g, '')) && phone.replace(/\s/g, '').length < 9) {
-      return showStatus('error', 'Please enter a valid phone number.');
+    const phoneClean = phone.replace(/[\s\-().+]/g, '');
+    if (!/^\d{9,15}$/.test(phoneClean)) {
+      return showStatus('error', 'Please enter a valid phone number (9–15 digits).');
     }
 
-    // Show loading state
+    // ── UI: loading state ───────────────────────────────────
     submitBtn.disabled = true;
-    submitBtn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Sending request…';
+    submitBtn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Sending…';
 
-    // Simulate async submission (replace with real API/webhook integration)
-    await delay(900);
-
-    // Log for demo — replace with fetch() to your backend or Google Sheets
-    console.log({
+    // ── Payload ─────────────────────────────────────────────
+    const payload = {
       name,
       phone,
-      issue: issue || 'Not specified',
-      message: message || '—',
-      submittedAt: new Date().toISOString()
-    });
+      issue,
+      message,
+      submittedAt : new Date().toLocaleString('en-KE', { timeZone: 'Africa/Nairobi' }),
+      userAgent   : navigator.userAgent,
+      pageUrl     : window.location.href,
+    };
 
-    // Success
-    showStatus('success', '✓ Request received! Our team will contact you within 15 minutes.');
-    form.reset();
+    // ── Send to Google Sheets ────────────────────────────────
+    const { ok, error } = await sendToSheets(payload);
+
+    // ── UI: result ───────────────────────────────────────────
+    if (ok) {
+      showStatus('success', '✓ Request received! Our team will contact you within 15 minutes.');
+      form.reset();
+    } else {
+      console.error('[Sheets] Submission error:', error);
+      showStatus(
+        'error',
+        'Could not send your request right now. Please call or WhatsApp us directly.'
+      );
+    }
+
     submitBtn.disabled = false;
     submitBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Send Service Request';
   });
 
+
+  // ── Google Sheets sender ─────────────────────────────────────
+  async function sendToSheets(payload) {
+    // Guard: warn if URL not configured yet
+    if (!SHEETS_WEBHOOK_URL || SHEETS_WEBHOOK_URL.includes('YOUR_APPS_SCRIPT')) {
+      console.warn(
+        '[Sheets] SHEETS_WEBHOOK_URL is not configured.\n' +
+        'Deploy Code.gs as a Web App and paste the URL at the top of script.js.'
+      );
+      // In development/demo: simulate success so UX still works
+      await delay(700);
+      return { ok: true };
+    }
+
+    try {
+      const body = new URLSearchParams(payload);
+
+      const res = await fetch(SHEETS_WEBHOOK_URL, {
+        method  : 'POST',
+        headers : { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body    : body.toString(),
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => res.statusText);
+        return { ok: false, error: `HTTP ${res.status}: ${text}` };
+      }
+
+      // Apps Script returns: { result: "success" } or { result: "error", error: "..." }
+      const json = await res.json().catch(() => ({ result: 'success' }));
+
+      if (json.result === 'error') {
+        return { ok: false, error: json.error };
+      }
+
+      return { ok: true };
+
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  }
+
+
+  // ── Status display helper ────────────────────────────────────
   function showStatus(type, message) {
     if (!formStatus) return;
 
@@ -143,22 +206,23 @@ function initContactForm() {
 
     if (type === 'success') {
       formStatus.style.background = 'rgba(34,197,94,0.08)';
-      formStatus.style.color = '#16a34a';
-      formStatus.style.border = '1px solid rgba(34,197,94,0.25)';
+      formStatus.style.color      = '#16a34a';
+      formStatus.style.border     = '1px solid rgba(34,197,94,0.25)';
     } else {
       formStatus.style.background = 'rgba(239,68,68,0.08)';
-      formStatus.style.color = '#dc2626';
-      formStatus.style.border = '1px solid rgba(239,68,68,0.25)';
+      formStatus.style.color      = '#dc2626';
+      formStatus.style.border     = '1px solid rgba(239,68,68,0.25)';
     }
 
-    setTimeout(() => {
-      formStatus.style.display = 'none';
-    }, type === 'success' ? 6000 : 4000);
+    setTimeout(
+      () => { formStatus.style.display = 'none'; },
+      type === 'success' ? 6000 : 5000
+    );
   }
 }
 
 
-// ===== SCROLL REVEAL ANIMATIONS =====
+// ===== SCROLL REVEAL =====
 function initScrollReveal() {
   if (!('IntersectionObserver' in window)) return;
 
@@ -166,17 +230,16 @@ function initScrollReveal() {
     '.service-card, .testi-card, .feature-item, .contact-info-block, .contact-form-block'
   );
 
-  // Set initial state via inline styles for JS-driven reveal
   elements.forEach((el, i) => {
-    el.style.opacity = '0';
-    el.style.transform = 'translateY(28px)';
+    el.style.opacity    = '0';
+    el.style.transform  = 'translateY(28px)';
     el.style.transition = `opacity 0.55s ease ${i * 0.06}s, transform 0.55s ease ${i * 0.06}s`;
   });
 
   const observer = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
       if (entry.isIntersecting) {
-        entry.target.style.opacity = '1';
+        entry.target.style.opacity   = '1';
         entry.target.style.transform = 'translateY(0)';
         observer.unobserve(entry.target);
       }
