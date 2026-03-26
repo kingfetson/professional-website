@@ -1,0 +1,18 @@
+[build]
+  command = ""
+  publish = "."
+
+[build.environment]
+  NODE_VERSION = "18"
+
+# Form handling for your contact form
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Handle form submissions
+[[redirects]]
+  from = "/submit-form"
+  to = "/"
+  status = 200
